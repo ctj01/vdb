@@ -1,0 +1,20 @@
+# CMake build trees (any variant: build, build-msvc, build-ci...)
+build*/
+cmake-build-*/
+
+# .NET
+dotnet/**/bin/
+dotnet/**/obj/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# OS noise
+Thumbs.db
+.DS_Store
+
+# Test artifacts
+*.vdb
+*.vdb.tmp

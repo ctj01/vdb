@@ -1,0 +1,3 @@
+# Normalize to LF: the project builds on Linux, Windows and macOS; one
+# line-ending convention avoids phantom diffs between platforms.
+* text=auto eol=lf
