@@ -72,6 +72,113 @@ var same = segment.Search(queryEmbedding, k: 10);   // bit-identical results
 Everything the engine can throw surfaces as a `VdbException` with an error
 code and message — never a native crash.
 
+## From documents to search results (the RAG recipe)
+
+vdb stores and searches **vectors** — it does not read PDFs or call embedding
+models for you. This section shows the missing glue, end to end, because it
+is where most people get stuck.
+
+The pipeline is always the same four steps:
+
+```
+your documents → 1. chunk → 2. embed → 3. index (vdb) → 4. search & map back
+```
+
+### 1. Chunk your documents
+
+Embedding a whole document dilutes its meaning into one average-of-everything
+vector. Split it into passages first — a few hundred words with some overlap
+is a solid default:
+
+```csharp
+static IEnumerable<string> Chunk(string text, int maxWords = 250, int overlap = 50)
+{
+    var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+    for (var start = 0; start < words.Length; start += maxWords - overlap)
+    {
+        yield return string.Join(' ',
+            words.Skip(start).Take(maxWords));
+        if (start + maxWords >= words.Length) yield break;
+    }
+}
+```
+
+### 2. Embed each chunk
+
+Any embedding model works. This example uses [Ollama](https://ollama.com)
+running locally (`ollama pull nomic-embed-text`) — free, private, no API key.
+The same code shape applies to OpenAI/Azure/Cohere: POST text, get floats.
+
+```csharp
+static async Task<float[][]> EmbedAsync(HttpClient http, IReadOnlyList<string> texts)
+{
+    var resp = await http.PostAsJsonAsync("http://localhost:11434/api/embed",
+        new { model = "nomic-embed-text", input = texts });
+    var body = await resp.Content.ReadFromJsonAsync<EmbedResponse>();
+    return body!.embeddings;
+}
+record EmbedResponse(float[][] embeddings);
+```
+
+### 3. Index the chunks
+
+vdb only keeps `(external_id, vector)`. **You own the mapping from id back to
+text** — a `Dictionary`, a SQLite table, a JSON file, whatever your app
+already has. (The segment format supports typed metadata columns in the C++
+core; exposing them through the .NET binding is on the roadmap.)
+
+```csharp
+var chunks = new Dictionary<ulong, (string DocName, string Text)>();
+using var builder = new VdbIndexBuilder(dim: 768, VdbMetric.Cosine); // nomic = 768
+
+ulong nextId = 0;
+foreach (var doc in myDocuments)
+{
+    var pieces = Chunk(doc.Text).ToList();
+    var vectors = await EmbedAsync(http, pieces);
+    for (var i = 0; i < pieces.Count; i++)
+    {
+        chunks[nextId] = (doc.Name, pieces[i]);
+        builder.Add(nextId, vectors[i]);
+        nextId++;
+    }
+}
+using var index = builder.Freeze();
+index.WriteSegment("kb.vdb");   // and persist your chunks dictionary alongside
+```
+
+### 4. Search and map back to text
+
+```csharp
+var queryVec = (await EmbedAsync(http, new[] { userQuestion }))[0];
+var hits = index.Search(queryVec, k: 5);
+
+foreach (var hit in hits)
+{
+    var (docName, text) = chunks[hit.ExternalId];
+    Console.WriteLine($"[{hit.Score:F3}] {docName}: {text[..Math.Min(120, text.Length)]}...");
+}
+// For RAG: concatenate the top chunks into your LLM prompt as context,
+// with an instruction like "answer ONLY from the passages below".
+```
+
+### The gotchas that bite everyone
+
+- **Same model on both sides.** Documents and queries must be embedded with
+  the *same* model. Mixing models produces garbage results with no error —
+  the vectors simply live in different spaces.
+- **`dim` is fixed by the model.** nomic-embed-text = 768, MiniLM = 384,
+  OpenAI text-embedding-3-small = 1536. The builder's `dim` must match, and
+  changing models means rebuilding the index.
+- **Cosine is the metric for text embeddings.** Unless your model's docs say
+  otherwise, don't overthink it.
+- **No deletes yet.** Segments are immutable snapshots: when your corpus
+  changes, rebuild and atomically replace the segment (that's what the
+  tmp+rename write is for). Incremental updates arrive with the WAL/memtable
+  milestone.
+- **Ids are yours.** `external_id` is an opaque `u64` to vdb — encode
+  whatever you want in it (row id, doc id × 1000 + chunk index, hash...).
+
 ### What the package contains
 
 ```
