@@ -62,7 +62,11 @@ Result<void> AtomicWriteFile(const std::string& final_path, std::string_view byt
 
 Result<MappedFile> MappedFile::Open(const std::string& path) {
     const std::wstring wpath = Widen(path);
-    HANDLE file = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+    // FILE_SHARE_DELETE: match POSIX semantics — a mapped segment can be
+    // deleted/renamed underneath us (the mapping stays valid until closed).
+    // Without it, compaction could never remove segments still being read.
+    HANDLE file = CreateFileW(wpath.c_str(), GENERIC_READ,
+                              FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) {
         return MakeError(ErrorCode::kIo, "cannot open: " + path);

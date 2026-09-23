@@ -5,6 +5,7 @@ cmake-build-*/
 # .NET
 dotnet/**/bin/
 dotnet/**/obj/
+dotnet/packages/
 
 # IDE
 .vs/
