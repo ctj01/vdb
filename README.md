@@ -162,6 +162,12 @@ foreach (var hit in hits)
 // with an instruction like "answer ONLY from the passages below".
 ```
 
+> **Runnable version:** this whole recipe, including the final LLM answer via
+> a local Ollama model, lives in [`dotnet/samples/RagDemo`](dotnet/samples/RagDemo).
+> With Ollama running (`ollama pull nomic-embed-text qwen3-coder:30b`):
+> `cd dotnet/samples/RagDemo && dotnet run` — optionally
+> `dotnet run -- "your question" your-chat-model`.
+
 ### The gotchas that bite everyone
 
 - **Same model on both sides.** Documents and queries must be embedded with
